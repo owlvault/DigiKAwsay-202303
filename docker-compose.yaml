@@ -87,11 +87,12 @@ services:
       PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
       GCP_PROJECT_ID: my-local-project
       WEAVIATE_URL: http://weaviate:8080
+      VERTEX_AI_DISABLED: "true"
     volumes:
       - ./src/preprocessor:/app
     working_dir: /app
     command: >
-      bash -c "pip install google-cloud-pubsub && python main.py"
+      bash -c "pip install google-cloud-pubsub weaviate-client && python main.py"
 
   val-service:
     image: python:3.11-slim
@@ -103,12 +104,12 @@ services:
       PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
       GCP_PROJECT_ID: my-local-project
       GEMINI_API_KEY: $GEMINI_API_KEY
-      DATABASE_URL: postgres://digikawsay_app:local_password_123@postgres:5432/digikawsay
+      DATABASE_URL: postgresql://digikawsay_app:local_password_123@postgres:5432/digikawsay
     volumes:
       - ./src/val-service:/app
     working_dir: /app
     command: >
-      bash -c "pip install google-cloud-pubsub langchain-google-genai langgraph psycopg2-binary && python main.py"
+      bash -c "pip install google-cloud-pubsub langchain-google-genai 'langgraph>=0.2.0' langgraph-checkpoint-postgres 'psycopg[binary]' && python main.py"
 
   agente00-service:
     image: python:3.11-slim
@@ -121,7 +122,7 @@ services:
     environment:
       PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
       GCP_PROJECT_ID: my-local-project
-      DATABASE_URL: postgres://digikawsay_app:local_password_123@postgres:5432/digikawsay
+      DATABASE_URL: postgresql://digikawsay_app:local_password_123@postgres:5432/digikawsay
     volumes:
       - ./src/agente00-service:/app
     working_dir: /app

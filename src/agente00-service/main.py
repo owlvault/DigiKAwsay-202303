@@ -1,19 +1,22 @@
 import os
-import time
 import uuid
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
+import psycopg2
+import psycopg2.extras
 import logging
 
-import psycopg2  # Dummy import for MVP. In prod use asyncpg or SQLAlchemy
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://digikawsay_app:local_password_123@postgres:5432/digikawsay"
+)
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgres://user:pass@localhost:5432/digikawsay")
-
-app = FastAPI(title="AGENTE-00 Supervisor", version="1.0.0 (MVP)")
+app = FastAPI(title="AGENTE-00 Supervisor", version="1.1.0 (MVP)")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 class DirectivePayload(BaseModel):
     participant_id: str
@@ -22,62 +25,81 @@ class DirectivePayload(BaseModel):
     content: str
     urgency: str = "MEDIUM"
 
+
 @app.post("/admin/inject_directive")
 def inject_directive(payload: DirectivePayload):
     """
-    Endpoint de 'Shadowing'. Un analista humano (simulando al Swarm) 
-    inyecta una directiva forzada al estado de 'expert_directives' de LangGraph.
-    
-    Típicamente esto lo haría AGENTE-00 leyendo outputs de Pub/Sub `iap.swarm.output`, 
-    pero en el MVP lo exponemos como API manual para el 'Wizard of Oz'.
+    Endpoint de 'Shadowing'. Un analista humano inyecta una directiva que
+    VAL incorporará sutilmente en su próxima respuesta al participante.
+
+    Escribe en la tabla `digikawsay.pending_directives`, que val-service
+    lee y aplica atómicamente antes de cada invocación al LLM.
     """
     logger.info(f"Inyectando directiva para participante: {payload.participant_id}")
-    
+
     directive_id = str(uuid.uuid4())
-    directive = {
-        "id": directive_id,
-        "directive_type": "MANUAL_OVERRIDE",
-        "content": payload.content,
-        "urgency": payload.urgency,
-        "issued_by": "human_investigator",
-        "status": "PENDING",
-        "issued_at": datetime.utcnow().isoformat() + "Z"
-    }
-    
-    # Simular la actualización al Checkpointer (Postgres) de LangGraph
+
     try:
-        # Aquí buscaríamos el thread_id (participant_id) en la tabla del checkpointer 
-        # e inyectaríamos la directiva en 'expert_directives'.
-        
-        # connection = psycopg2.connect(DATABASE_URL)
-        # cursor = connection.cursor()
-        # cursor.execute("UPDATE langgraph_checkpoints SET state = jsonb_insert... WHERE thread_id = %s", (payload.participant_id,))
-        # connection.commit()
-        
-        logger.info(f"Directiva inyectada exitosamente (Simulado). \nContenido: {payload.content}")
+        with psycopg2.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO digikawsay.pending_directives
+                        (id, participant_id, content, urgency, issued_by)
+                    VALUES (%s, %s, %s, %s, %s)
+                    """,
+                    (
+                        directive_id,
+                        payload.participant_id,
+                        payload.content,
+                        payload.urgency,
+                        "human_investigator",
+                    ),
+                )
+            conn.commit()
+
+        logger.info(f"Directiva {directive_id} persistida en BD para {payload.participant_id}")
         return {"status": "success", "directive_id": directive_id}
-        
+
     except Exception as e:
         logger.error(f"Error inyectando directiva: {e}")
-        raise HTTPException(status_code=500, detail="Database override failed")
+        raise HTTPException(status_code=500, detail="Database write failed")
+
 
 @app.post("/system/pubsub/val_report")
 def handle_val_report(request: dict):
     """
-    Webhook para recibir el hit de Pub/Sub `iap.val.to.ag00` (En Cloud Run las suscripciones push son comunes).
-    Actualiza métricas de ciclo.
+    Webhook para recibir notificaciones de turno completado desde val-service
+    vía Pub/Sub push (típico en Cloud Run). Actualiza métricas del ciclo.
     """
     try:
-        logger.info(f"Reporte de VAL recibido: {request}")
-        # Lógica para registrar el N_Turnos y evaluar Saturation_Index simulada...
+        participant_id = request.get("participant_id")
+        turn_count = request.get("turn_count", 0)
+        logger.info(f"Turno completado — participante: {participant_id}, turno: {turn_count}")
+
+        with psycopg2.connect(DATABASE_URL) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE digikawsay.dialogue_states
+                    SET turn_count = %s, last_turn_at = NOW()
+                    WHERE participant_id = %s AND status = 'active'
+                    """,
+                    (turn_count, participant_id),
+                )
+            conn.commit()
+
         return {"status": "acknowledged"}
+
     except Exception as e:
-        logger.error("Error validando el reporte de VAL")
+        logger.error(f"Error procesando reporte de VAL: {e}")
         raise HTTPException(status_code=400, detail="Bad reporting format")
+
 
 @app.get("/health")
 def health_check():
     return {"status": "healthy", "service": "agente00-service", "mode": "Wizard-Of-Oz"}
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -7,11 +7,19 @@ pydantic>=2.7.4
 # LangGraph & VAL Service
 langchain-core>=0.2.9
 langchain-google-genai>=1.0.6
-langgraph>=0.0.69
+langgraph>=0.2.0
+langgraph-checkpoint-postgres>=2.0.0
 
-# GCP / PubSub
+# GCP / PubSub & Vertex AI
 google-cloud-pubsub>=2.21.3
+google-cloud-aiplatform>=1.50.0
 
 # Persistencia
+psycopg[binary]>=3.1.0
 psycopg2-binary>=2.9.9
 weaviate-client>=4.6.4
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0

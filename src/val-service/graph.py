@@ -59,15 +59,12 @@ def val_node(state: DigiKawsayState) -> dict:
         "expert_directives": [] 
     }
 
-def construct_graph() -> StateGraph:
+def construct_graph(checkpointer=None):
     workflow = StateGraph(DigiKawsayState)
-    
+
     workflow.add_node("val_agent", val_node)
-    
+
     workflow.add_edge(START, "val_agent")
     workflow.add_edge("val_agent", END)
-    
-    return workflow.compile()
 
-# Instancia compilada del grafo (necesitará checkpointer en prod)
-app = construct_graph()
+    return workflow.compile(checkpointer=checkpointer)

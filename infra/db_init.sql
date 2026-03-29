@@ -79,7 +79,21 @@ CREATE TABLE channel_outbound_messages (
   created_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Directivas pendientes de expertos (patrón Shadowing / Wizard-of-Oz)
+-- Desacoplado del checkpoint interno de LangGraph para manipulación segura
+CREATE TABLE pending_directives (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  participant_id  TEXT NOT NULL,
+  content         TEXT NOT NULL,
+  urgency         TEXT DEFAULT 'MEDIUM' CHECK (urgency IN ('LOW', 'MEDIUM', 'HIGH')),
+  issued_by       TEXT DEFAULT 'human_investigator',
+  status          TEXT DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPLIED')),
+  created_at      TIMESTAMPTZ DEFAULT NOW(),
+  applied_at      TIMESTAMPTZ
+);
+
 -- Indices
 CREATE INDEX idx_dialogue_states_project ON dialogue_states(project_id, cycle_id);
 CREATE INDEX idx_dialogue_states_status ON dialogue_states(status) WHERE status = 'active';
 CREATE INDEX idx_data_gaps_open ON data_gaps(project_id) WHERE status = 'OPEN';
+CREATE INDEX idx_pending_directives_active ON pending_directives(participant_id) WHERE status = 'PENDING';
