@@ -2,23 +2,39 @@
 Tests unitarios para channel-layer.
 Verifica normalización de mensajes Telegram sin dependencias externas (Pub/Sub mockeado).
 """
+import importlib.util
 import json
-import sys
 import os
-from unittest.mock import MagicMock, patch
+import sys
+from unittest.mock import MagicMock
 
 import pytest
 from httpx import AsyncClient, ASGITransport
 
-# Stub de pubsub_v1 antes de importar el módulo
-pubsub_mock = MagicMock()
-pubsub_mock.PublisherClient.return_value.topic_path.return_value = "projects/test/topics/test"
-pubsub_mock.PublisherClient.return_value.publish.return_value.result.return_value = None
-sys.modules["google.cloud.pubsub_v1"] = pubsub_mock
-sys.modules["google.cloud"] = MagicMock()
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../src/channel-layer"))
-from main import app  # noqa: E402
+def load_channel_layer_app():
+    """Carga channel-layer/main.py con Pub/Sub mockeado."""
+    pubsub_mock = MagicMock()
+    pubsub_mock.PublisherClient.return_value.topic_path.return_value = "projects/test/topics/test"
+    pubsub_mock.PublisherClient.return_value.publish.return_value.result.return_value = None
+
+    google_mock = MagicMock()
+    google_cloud_mock = MagicMock()
+    google_cloud_mock.pubsub_v1 = pubsub_mock
+
+    sys.modules.setdefault("google", google_mock)
+    sys.modules["google.cloud"] = google_cloud_mock
+    sys.modules["google.cloud.pubsub_v1"] = pubsub_mock
+
+    module_path = os.path.join(os.path.dirname(__file__), "../../src/channel-layer/main.py")
+    spec = importlib.util.spec_from_file_location("channel_layer_main", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module, pubsub_mock
+
+
+_channel_module, _pubsub_mock = load_channel_layer_app()
+app = _channel_module.app
 
 
 TELEGRAM_TEXT_UPDATE = {
@@ -61,7 +77,7 @@ async def test_webhook_publishes_normalized_message():
         future.result.return_value = None
         return future
 
-    pubsub_mock.PublisherClient.return_value.publish.side_effect = capture_publish
+    _pubsub_mock.PublisherClient.return_value.publish.side_effect = capture_publish
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         await client.post("/webhook", json=TELEGRAM_TEXT_UPDATE)
